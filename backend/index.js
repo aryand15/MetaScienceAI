@@ -57,7 +57,17 @@ app.get("/:project_id/select-variables", (req, res) => {
 
 })
 
-app.post("/project/:project_id", (req, res) => {    // Route to create a new project
+app.post("/project", async (req, res) => {    // Route to create a new project
+    const projectData = req.body;
+    mongoose.connect(MONGO_URI);
+    try{
+        const newProject = new Project(projectData);
+        await newProject.save()
+        res.status(201).json({ message: "Project created successfully", projectId: newProject._id });
+    } catch (error) {
+        res.status(500).json({ message: "Error creating project", error });
+    }
+
 
 })
 
