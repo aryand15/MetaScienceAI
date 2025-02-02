@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <form id="keywordsSearch">
+        <label for="keywords">Keywords: </label>
+        <input type="text" id="keywords">
+        <button id="submit">Submit</button>
+    </form>
+    <div id="results">
+        <button id="upload" style="display:none">Upload PDFs</button>
+        <button id="analyze" style="display:none">Analyze PDFs</button>
+    </div>
+    <script>
+        document.getElementById("keywordsSearch").addEventListener("submit", async e => {
+            e.preventDefault();
+            console.log("Submit Clicked!")
+            const userInput = document.getElementById("keywords").value;
+            const url = `http://localhost:5550/search?userInput=${encodeURIComponent(userInput)}`;
+            console.log(userInput)
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                console.log(data);
+
+                data.forEach(paper => {
+                    document.getElementById("results").innerHTML += `${JSON.stringify(paper)}\n`;
+                })
+                document.getElementById("upload").style.display="block";
+
+                document.getElementById("upload").addEventListener("click", async e => {
+                    console.log(data);
+                    console.log(JSON.stringify(data));
+                    try {
+                        const response = await fetch("/upload", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(data)
+                        })
+                        if (response.status === 200) {
+                            console.log("successful upload");
+                            document.getElementById("analyze").style.display="block";
+                            document.getElementById("analyze").addEventListener("click", async e =>{
+                                
+                            })
+                        }
+                    } catch (e) {
+                        console.log(e);
+                    }
+                })
+                
+            } catch (e) {
+                console.log(e);
+            }
+        })
+    </script>
+</body>
+
+</html>
