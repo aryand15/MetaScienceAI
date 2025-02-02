@@ -16,6 +16,10 @@ const Grid = require("gridfs-stream");
 const { GridFsStorage } = require("multer-gridfs-storage");
 const { spawn } = require("child_process");
 
+//Schema Imports
+const Project = require("./models/Project.js")
+const User = require("./models/User.js")
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -41,6 +45,50 @@ const client = new MongoClient(MONGO_URI, {
     }
 });
 
+app.get("/create-project", (req,res)=>{
+    
+})
+
+app.get("/:project_id/formulate-question", (req, res) => {
+
+})
+
+app.get("/:project_id/select-variables", (req, res) => {
+
+})
+
+app.post("/project/:project_id", (req, res) => {    // Route to create a new project
+
+})
+
+app.put("/project/:project_id", (req, res) => {     // Route to update existing project
+    
+})
+
+app.post("/select-and-save-papers/:project_id", (req, res) => {
+    // PUT "/project/:project_id" with filters & question to save to db
+
+    //query db, set vars, get keywords based on name, desc, question
+     
+    // feed keywords into api to get list of pdfs
+
+    // Uploading selected pdfs
+    console.log("REQUEST BODY:", req.body);
+    const pdfsToUpload = req.body;
+    console.log(pdfsToUpload,req.params.project_id);
+
+    // Upload Multiple PDFs
+    uploadMultiplePDFs(pdfsToUpload, req.params.project_id)
+    .then(() => {
+        console.log("successful upload");
+        res.status(200).send("Successful upload");
+    })
+    .catch((err) => console.error("Error:", err));
+    
+     
+
+
+})
 
 app.get("/search", (req, res) => {
     const userInput = req.query.userInput
@@ -167,7 +215,7 @@ app.get("/analyze", async (req,res)=>{
 
 
 
-async function uploadMultiplePDFs(pdfList) {
+async function uploadMultiplePDFs(pdfList, project_id) {
     //const client = new MongoClient(MONGO_URI);
     try {
         await client.connect();
@@ -180,9 +228,9 @@ async function uploadMultiplePDFs(pdfList) {
             try {
                 console.log(`Downloading: ${metadata.title}`);
 
-                const response = await axios.get(metadata.url, { responseType: 'stream' });
+                const response = await axios.get(metadata.url, { responseType: '' }); //
 
-                const uploadStream = bucket.openUploadStream(metadata.title, { metadata });
+                const uploadStream = bucket.openUploadStream(metadata.title, { metadata },project_id);
                 response.data.pipe(uploadStream);
 
                 return new Promise((resolve, reject) => {
