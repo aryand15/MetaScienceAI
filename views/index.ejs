@@ -9,18 +9,20 @@
 <body>
     <form id="keywordsSearch">
         <label for="keywords">Keywords: </label>
-        <input type="text" id="keywords">
+        <input type="text" id="keywords"/>
         <button id="submit">Submit</button>
     </form>
     <div id="results">
         <button id="upload" style="display:none">Upload PDFs</button>
         <button id="analyze" style="display:none">Analyze PDFs</button>
     </div>
+    <div id="extracted"></div>
     <script>
         document.getElementById("keywordsSearch").addEventListener("submit", async e => {
             e.preventDefault();
             console.log("Submit Clicked!")
             const userInput = document.getElementById("keywords").value;
+            console.log("USER INPUT:", userInput);
             const url = `http://localhost:5550/search?userInput=${encodeURIComponent(userInput)}`;
             console.log(userInput)
             try {
@@ -48,7 +50,17 @@
                             console.log("successful upload");
                             document.getElementById("analyze").style.display="block";
                             document.getElementById("analyze").addEventListener("click", async e =>{
-                                
+                                try{    
+                                    const response = await fetch("/analyze");
+                                    const data = await response.json();
+                                    console.log(data);
+                                    data.forEach(paper => {
+                                        document.getElementById("extracted").innerHTML += `${JSON.stringify(paper)}\n`;
+                                    })
+                                    
+                                } catch (e) {
+                                    console.log(e);
+                                }
                             })
                         }
                     } catch (e) {

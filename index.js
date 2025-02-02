@@ -3,7 +3,7 @@ const http = require("http");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const jwt = require('jsonwebtoken');
-const { MongoClient, ServerApiVersion, GridFSBucket } = require('mongodb');
+const { MongoClient, ServerApiVersion, GridFSBucket, ObjectId } = require('mongodb');
 const path = require('path');
 const mongoose = require("mongoose");
 const cookieParser = require('cookie-parser');
@@ -14,6 +14,7 @@ const axios = require("axios");
 const multer = require("multer");
 const Grid = require("gridfs-stream");
 const { GridFsStorage } = require("multer-gridfs-storage");
+const { spawn } = require("child_process");
 
 const app = express();
 app.use(express.json());
@@ -29,11 +30,23 @@ const server = http.createServer(app);
 
 const port = 5550;
 
+const MONGO_URI = "mongodb+srv://globesense0:Elm501A!@cluster0.whtiy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const DB_NAME = "researchPDFDB";
+const BUCKET_NAME = "pdfs";
+const client = new MongoClient(MONGO_URI, {
+    serverApi: {
+      version: ServerApiVersion.v1,
+      strict: true,
+      deprecationErrors: true,
+    }
+});
+
 
 app.get("/search", (req, res) => {
-    const userInput = req.params.userInput
+    const userInput = req.query.userInput
+    console.log("USER INPUT:", userInput)
     const URL = `https://api.semanticscholar.org/graph/v1/paper/search?query=${userInput}&year=2020-2023&openAccessPdf&fields=title,year,authors,openAccessPdf&limit=5`;
-
+    //const URL = `https://api.semanticscholar.org/graph/v1/paper/search?query=covid19&openAccessPdf&fields=title,year,authors,openAccessPdf&limit=50`
   axios.get(URL)
     .then(response => {
       if (response.status !== 200) {
@@ -41,6 +54,7 @@ app.get("/search", (req, res) => {
       } else {
         const resultsList = []
         const data = response.data;
+        let count = 0;
         data.data.forEach(paper => {
             const paperObj = {};
             paperObj.id = paper.paperId;
@@ -48,6 +62,7 @@ app.get("/search", (req, res) => {
             paperObj.year = paper.year;
             paperObj.url = paper.openAccessPdf.url;
             console.log(paperObj);
+            console.log("COUNT:", ++count);
             resultsList.push(paperObj);
         });
         res.json(resultsList);
@@ -62,13 +77,98 @@ app.get("/test", (req, res) => {
     return res.render("index", {});
 })
 
+async function getPDFBuffer(fileId) {
+  await client.connect();
+  const db = client.db(DB_NAME);
+  const bucket = new GridFSBucket(db, { bucketName: BUCKET_NAME });
 
-const MONGO_URI = "mongodb+srv://globesense0:Elm501A!@cluster0.whtiy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-const DB_NAME = "researchPDFDB";
-const BUCKET_NAME = "pdfs";
+  return new Promise((resolve, reject) => {
+      let bufferArray = [];
+      const downloadStream = bucket.openDownloadStream(fileId);
+
+      downloadStream.on("data", (chunk) => bufferArray.push(chunk));
+      downloadStream.on("end", () => {
+          client.close();
+          const buffer = Buffer.concat(bufferArray);
+          console.log(buffer);
+          resolve(buffer); // Convert to a single buffer
+      });
+      downloadStream.on("error", (err) => {
+          client.close();
+          reject(err);
+      });
+  });
+}
+
+function analyzePDFWithPython(pdfBuffer) {
+  return new Promise((resolve, reject) => {
+      const pythonProcess = spawn("python3", ["./py_scripts/analyze_pdf.py"]);
+
+      let output = "";
+      pythonProcess.stdout.on("data", (data) => (output+=data.toString()));
+
+      pythonProcess.stderr.on("data", (data) => console.error("Python Error:", data.toString()));
+
+      pythonProcess.on("close", (code) => {
+          if (code === 0) {
+              resolve(JSON.parse(output)); // Parse extracted insights
+          } else {
+              reject(new Error("Python script failed"));
+          }
+      });
+
+      // Send PDF buffer to Python
+      pythonProcess.stdin.write(pdfBuffer);
+      pythonProcess.stdin.end();
+  });
+}
+
+async function processPDF(fileId) {
+  try {
+      const pdfBuffer = await getPDFBuffer(new ObjectId(fileId));
+      console.log("BUFFER:", pdfBuffer)
+      console.log("PDF retrieved, sending to Python...");
+
+      const extractedInsights = await analyzePDFWithPython(pdfBuffer);
+      console.log(extractedInsights);
+      return extractedInsights;
+  } catch (err) {
+      console.error("Error processing PDF:", err);
+  }
+}
+
+// Example Usage: Pass a valid ObjectId from GridFS
+//processPDF("65b43f6c1d2e7a0012a0c1ab");
+
+
+
+app.get("/analyze", async (req,res)=>{
+    try {
+        await client.connect();
+        const db = client.db(DB_NAME);
+        const bucket = new GridFSBucket(db, { bucketName: BUCKET_NAME });
+        const filesCollection = db.collection(`${BUCKET_NAME}.files`);
+
+        // Get all files stored in the bucket
+        const files = await filesCollection.find({}).toArray();
+        const allAnalysisResults = [];
+        for (const file of files) {
+            const result = await processPDF(file._id);
+            allAnalysisResults.push(result);
+        }
+        res.json(allAnalysisResults);
+    } catch (e) {
+        console.log(e)
+    }
+    
+
+})
+
+
+
 
 async function uploadMultiplePDFs(pdfList) {
-    const client = new MongoClient(MONGO_URI);
+    //const client = new MongoClient(MONGO_URI);
     try {
         await client.connect();
         const db = client.db(DB_NAME);
@@ -135,7 +235,10 @@ app.post("/upload", (req, res) => {
 
     // Upload Multiple PDFs
     uploadMultiplePDFs(pdfsToUpload)
-    .then(() => res.status(200))
+    .then(() => {
+        console.log("successful upload");
+        res.status(200).send("Successful upload");
+    })
     .catch((err) => console.error("Error:", err));
 });
 
@@ -147,58 +250,5 @@ server.listen(port, () => {
 });
 
 
-const uri = "mongodb+srv://globesense0:Elm501A!@cluster0.whtiy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
-});
 
-async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-    // Ensures that the client will close when you finish/error
-    await client.close();
-  }
-}
-run().catch(console.dir);
-/*const uri = "mongodb+srv://globesense0:Elm501A!@cluster0.whtiy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-
-// Initialize mongoose connection to MongoDB
-mongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => {
-    const connection = mongoose.connection;
-    connection.once("open", () => {
-      gfs = Grid(connection.db, mongoose.mongo);
-      gfs.collection("papers");
-      console.log("Connected to MongoDB and GridFS initialized.");
-    });
-  })
-  .catch(err => console.log("Error connecting to MongoDB:", err));
-
-// Initialize GridFS Storage for multer
-const storage = new GridFsStorage({
-  url: uri,
-  file: (req, file) => {
-    return {
-      filename: `${Date.now()}_${file.originalname}`,
-      bucketName: "papers",
-      metadata: {
-        title: req.body.title,
-        author: req.body.author,
-        doi: req.body.doi,
-        year: req.body.year
-      }
-    };
-  }
-});
-const upload = multer({ storage });*/
