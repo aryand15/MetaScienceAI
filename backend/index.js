@@ -26,7 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
 app.use(express.static('public'));
 app.use(cors({
-    origin: "http://127.0.0.1:5550", 
+    origin: ["http://localhost:5550", "http://127.0.0.1:5550"],
     credentials: true                   
 }));
 
@@ -34,8 +34,8 @@ const server = http.createServer(app);
 
 const port = 5550;
 
-const MONGO_URI = "mongodb+srv://globesense0:Elm501A!@cluster0.whtiy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-const DB_NAME = "researchPDFDB";
+const MONGO_URI = "mongodb+srv://globesense0:Elm501A!@cluster0.whtiy.mongodb.net/researchPDFDB?retryWrites=true&w=majority";
+const DB_NAME = "researchPDFDB";  
 const BUCKET_NAME = "pdfs";
 const client = new MongoClient(MONGO_URI, {
     serverApi: {
@@ -63,6 +63,8 @@ app.post("/project", async (req, res) => {    // Route to create a new project
     try{
         const newProject = new Project(projectData);
         await newProject.save()
+        console.log(newProject);
+        console.log(newProject?._id);
         res.status(201).json({ message: "Project created successfully", projectId: newProject._id });
     } catch (error) {
         res.status(500).json({ message: "Error creating project", error });
@@ -71,33 +73,70 @@ app.post("/project", async (req, res) => {    // Route to create a new project
 
 })
 
-app.put("/project/:project_id", (req, res) => {     // Route to update existing project
-    
+app.put("/project/:project_id", async(req, res) => {     // Route to update existing project
+    mongoose.connect(MONGO_URI);
+    try{
+        const project = await Project.findOneAndUpdate(
+            {_id: req.params.project_id},
+            { $set: req.body},
+            { new: true }
+        );
+        res.status(201).json({ message: "Project updated successfully", projectId: newProject._id });
+    } catch (error) {
+        res.status(500).json({ message: "Error updating project", error });
+    }
 })
 
-app.post("/select-and-save-papers/:project_id", (req, res) => {
+
+
+app.post("/select-and-save-papers/:project_id", async (req, res) => {
     // PUT "/project/:project_id" with filters & question to save to db
+    mongoose.connect(MONGO_URI);
+    try {
+        const project = await Project.findOneAndUpdate(
+            {_id: req.params.project_id},
+            { $set: req.body},
+            { new: true }
+        );
 
-    //query db, set vars, get keywords based on name, desc, question
+
+        //query db, set vars, get keywords based on name, desc, question
      
-    // feed keywords into api to get list of pdfs
+        // feed keywords into api to get list of pdfs
+        const URL = `https://api.semanticscholar.org/graph/v1/paper/search?query=${project.research_question}&year=${project.filters.yearRange.startYear}-${project.filters.yearRange.endYear}&openAccessPdf&minCitationCount=${project.filters.minCitationCount}&fieldsOfStudy=${project.research_domain}&publicationTypes=${project.filters.publicationTypes.join(",")}&fields=title,year,openAccessPdf&limit=${project.filters.paperCount}`;
+        console.log("API URL:", URL);
+        const pdfsToUpload = []
+        axios.get(URL)
+        .then(response => {
+        if (response.status !== 200) {
+            return res.status(500).json({message: "unable to receive data" });
+        } else {
+            const data = response.data;
+            let count = 0;
+            console.log(data.data)
+            data.data.forEach(paper => {
+                const paperObj = {};
+                paperObj.id = paper.paperId;
+                paperObj.title = paper.title;
+                paperObj.year = paper.year;
+                paperObj.url = paper.openAccessPdf.url;
+                console.log(paperObj);
+                console.log("COUNT:", ++count);
+                pdfsToUpload.push(paperObj);
+            });
+            console.log(pdfsToUpload,req.params.project_id);
 
-    // Uploading selected pdfs
-    console.log("REQUEST BODY:", req.body);
-    const pdfsToUpload = req.body;
-    console.log(pdfsToUpload,req.params.project_id);
-
-    // Upload Multiple PDFs
-    uploadMultiplePDFs(pdfsToUpload, req.params.project_id)
-    .then(() => {
-        console.log("successful upload");
-        res.status(200).send("Successful upload");
-    })
-    .catch((err) => console.error("Error:", err));
-    
-     
-
-
+            // Upload Multiple PDFs
+            uploadMultiplePDFs(pdfsToUpload, req.params.project_id)
+            .then(() => {
+                console.log("successful upload");
+                res.status(200).send("Successful upload");
+            })
+            .catch((err) => console.error("Error:", err));
+        }})
+    } catch (error) {
+        return res.status(500).json({ message: "Error updating project", error });
+    }
 })
 
 app.get("/search", (req, res) => {
