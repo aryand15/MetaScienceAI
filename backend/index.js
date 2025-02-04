@@ -15,7 +15,7 @@ const multer = require("multer");
 const Grid = require("gridfs-stream");
 const { GridFsStorage } = require("multer-gridfs-storage");
 const { spawn } = require("child_process");
-
+const puppeteer = require('puppeteer');
 //Schema Imports
 const Project = require("./models/Project.js")
 const User = require("./models/User.js")
@@ -109,6 +109,7 @@ app.post("/select-and-save-papers/:project_id", async (req, res) => {
         axios.get(URL)
         .then(response => {
         if (response.status !== 200) {
+            console.log("semantic scholar api didn't work")
             return res.status(500).json({message: "unable to receive data" });
         } else {
             const data = response.data;
@@ -124,7 +125,7 @@ app.post("/select-and-save-papers/:project_id", async (req, res) => {
                 console.log("COUNT:", ++count);
                 pdfsToUpload.push(paperObj);
             });
-            console.log(pdfsToUpload,req.params.project_id);
+            console.log("pdfsToUpload",pdfsToUpload,req.params.project_id);
 
             // Upload Multiple PDFs
             uploadMultiplePDFs(pdfsToUpload, req.params.project_id)
@@ -262,10 +263,66 @@ app.get("/analyze", async (req,res)=>{
 })
 
 
+async function downloadPDF(bucket, project_id, browser, metadata) {
+    try {
+        console.log("About to open new page");
+        const page = await browser.newPage();
+        console.log("Browser page opened");
+
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
+
+        console.log(`Navigating to ${metadata.url}...`);
+        
+        await page.goto(metadata.url, {
+            waitUntil: 'networkidle2',
+            timeout: 20000 // Set a timeout of 20 seconds to prevent indefinite waits
+        });
+
+        console.log('Page loaded.');
+
+        // Generate PDF buffer
+        const pdfBuffer = await page.pdf();
+        
+        // Create upload stream
+        const uploadStream = bucket.openUploadStream(metadata.title, { metadata, project_id });
+
+        return new Promise((resolve, reject) => {
+            uploadStream.write(pdfBuffer, (err) => {
+                if (err) {
+                    console.error(`Upload failed for ${metadata.title}:`, err);
+                    reject(err);
+                }
+            });
+
+            uploadStream.end();
+            
+            uploadStream.on("finish", () => {
+                console.log(`Uploaded: ${metadata.title} (ID: ${uploadStream.id})`);
+                resolve(uploadStream.id);
+            });
+
+            uploadStream.on("error", (error) => {
+                console.error(`Upload failed for ${metadata.title}:`, error);
+                reject(error);
+            });
+        });
+
+    } catch (error) {
+        console.error(`Error downloading ${metadata.title}:`, error.message);
+        return null; // Return null so failed PDFs are skipped, not blocking others
+    }
+}
+
 
 
 async function uploadMultiplePDFs(pdfList, project_id) {
-    //const client = new MongoClient(MONGO_URI);
+    const { default: pLimit } = await import("p-limit");
+    const limit = pLimit(5); // Limit concurrency to 5
+
+    
+    const browser = await puppeteer.launch({ headless: true });
+    const client = new MongoClient(MONGO_URI);
+
     try {
         await client.connect();
         const db = client.db(DB_NAME);
@@ -273,39 +330,28 @@ async function uploadMultiplePDFs(pdfList, project_id) {
 
         console.log(`Starting upload of ${pdfList.length} PDFs...`);
 
-        const uploadPromises = pdfList.map(async (metadata) => {
-            try {
-                console.log(`Downloading: ${metadata.title}`);
+        // Create an array of promises for concurrent downloads/uploads
+        const uploadPromises = pdfList.map(metadata =>
+            limit(() => downloadPDF(bucket, project_id, browser, metadata))
+        );
 
-                const response = await axios.get(metadata.url, { responseType: '' }); //
+        // Wait for all downloads/uploads to finish
+        const results = await Promise.all(uploadPromises);
 
-                const uploadStream = bucket.openUploadStream(metadata.title, { metadata },project_id);
-                response.data.pipe(uploadStream);
-
-                return new Promise((resolve, reject) => {
-                    uploadStream.on("finish", () => {
-                        console.log(`Uploaded: ${metadata.title} (ID: ${uploadStream.id})`);
-                        resolve(uploadStream.id);
-                    });
-
-                    uploadStream.on("error", (error) => {
-                        console.error(`Upload failed for ${metadata.title}:`, error);
-                        reject(error);
-                    });
-                });
-
-            } catch (error) {
-                console.error(`Failed to process ${metadata.title}:`, error);
-            }
-        });
-
-        await Promise.all(uploadPromises);
-        console.log("All uploads complete.");
-
+        // Filter out failed downloads (null values)
+        const successfulUploads = results.filter(id => id !== null);
+        
+        console.log(`✅ Successfully uploaded ${successfulUploads.length}/${pdfList.length} PDFs`);
+        
+    } catch (error) {
+        console.error("Error in uploadMultiplePDFs:", error);
     } finally {
+        await browser.close();
         await client.close();
+        console.log("Browser and DB connections closed.");
     }
 }
+
 
 
 
