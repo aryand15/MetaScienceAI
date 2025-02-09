@@ -1,16 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 
 import axios from "axios";
 
 
 
-const FormulateQuestion = () => {
+const ChooseFilters = () => {
     
     const [minCitationCount, setMinCitationCount] = useState('');
     const [startYear, setStartYear] = useState('');
     const [endYear, setEndYear] = useState('');
     const [paperCount, setPaperCount] = useState('50');
+    const [researchQuestion, setResearchQuestion] = useState("");
+
+    let navigate = useNavigate();
+
+    const projectId = useParams().project_id;
+    console.log("PID", projectId)
+
+    
+
+    useEffect(() => {
+        async function fetchResearchQuestion() {
+            try {
+                const response = await axios.get(`http://127.0.0.1:5550/project/${projectId}?fields=research_question`);
+                
+                if (response.status !== 200) {
+                    return null;
+                }
+
+                const data = response.data.data;
+                return data.hasOwnProperty("research_question") ? data.research_question : null;
+            } catch (error) {
+                console.error("Error fetching project data:", error);
+                return null;
+            }
+        }
+        console.log("reached");
+        (async () => {
+            const question = await fetchResearchQuestion();
+            
+
+            if (question === null) {
+                console.log("Navigating...");
+                navigate(`/${projectId}/formulate-question`);
+            }
+            console.log("QUESTION:", question);
+            setResearchQuestion(question);
+        })();
+    }, []);
 
     const checkboxStates = {
         "Review": true, 
@@ -21,29 +59,32 @@ const FormulateQuestion = () => {
         "ClinicalTrial": true
     }
 
-    const projectId = useParams().project_id;
-    console.log("PID", projectId)
+    
     
 
     function changeCheckedStatus(parameter) {
         checkboxStates[parameter] = !checkboxStates[parameter];
     }
 
-    let navigate = useNavigate();
+    
     const handleSubmit = async (e) => {
         e.preventDefault();
         const data = {
-            filters: {
-                publicationTypes: Object.keys(checkboxStates).filter(parameter => checkboxStates[parameter] === true),
-                minCitationCount: minCitationCount,
-                yearRange: {
-                    startYear: startYear,
-                    endYear: endYear
-                },
-                paperCount: paperCount
+            data: {
+                filters: {
+                    publicationTypes: Object.keys(checkboxStates).filter(parameter => checkboxStates[parameter] === true),
+                    minCitationCount: minCitationCount,
+                    yearRange: {
+                        startYear: startYear,
+                        endYear: endYear
+                    },
+                    paperCount: paperCount
+                }
             },
-            research_question: "Covid-19 Vaccine effects"
+            research_question: researchQuestion
         }
+
+        
         
         
         const response = await axios.post(`http://127.0.0.1:5550/select-and-save-papers/${projectId}`, data);
@@ -62,7 +103,7 @@ const FormulateQuestion = () => {
     return (
         <div>
             <form onSubmit={handleSubmit}>
-                <input name="research-question" id="research-question" type="text" value="Covid-19 Vaccine effects"/>
+                <input disabled name="research-question" id="research-question" type="text" value={researchQuestion}/>
                 <input 
                     name="min-citation-count" 
                     id="min-citation-count" 
@@ -130,4 +171,4 @@ const FormulateQuestion = () => {
     )
 }
 
-export default FormulateQuestion
+export default ChooseFilters

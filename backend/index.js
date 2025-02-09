@@ -81,7 +81,28 @@ app.put("/project/:project_id", async(req, res) => {     // Route to update exis
             { $set: req.body},
             { new: true }
         );
-        res.status(201).json({ message: "Project updated successfully", projectId: newProject._id });
+        res.status(201).json({ message: "Project updated successfully", projectId: project._id });
+    } catch (error) {
+        res.status(500).json({ message: "Error updating project", error });
+    }
+})
+
+app.get("/project/:project_id", async(req, res) => {     // Route to fetch existing project
+    const fields = req.query.fields ? req.query.fields.split(",") : [];
+    mongoose.connect(MONGO_URI);
+    try{
+        const project = await Project.findOne(
+            {_id: req.params.project_id}
+        );
+        const jsonProject = project.toObject();
+        const response = {}
+        Object.entries(jsonProject).forEach(([key, value]) => {
+            if (fields.includes(key)){
+                response[key] = value;
+            }
+        });
+
+        res.status(201).json({ message: "Project fetched successfully", data: response });
     } catch (error) {
         res.status(500).json({ message: "Error updating project", error });
     }
@@ -95,7 +116,7 @@ app.post("/select-and-save-papers/:project_id", async (req, res) => {
     try {
         const project = await Project.findOneAndUpdate(
             {_id: req.params.project_id},
-            { $set: req.body},
+            { $set: req.body.data},
             { new: true }
         );
 
@@ -103,7 +124,7 @@ app.post("/select-and-save-papers/:project_id", async (req, res) => {
         //query db, set vars, get keywords based on name, desc, question
      
         // feed keywords into api to get list of pdfs
-        const URL = `https://api.semanticscholar.org/graph/v1/paper/search?query=${project.research_question}&year=${project.filters.yearRange.startYear}-${project.filters.yearRange.endYear}&openAccessPdf&minCitationCount=${project.filters.minCitationCount}&fieldsOfStudy=${project.research_domain}&publicationTypes=${project.filters.publicationTypes.join(",")}&fields=title,year,openAccessPdf&limit=${project.filters.paperCount}`;
+        const URL = `https://api.semanticscholar.org/graph/v1/paper/search?query=${req.body.research_question}&year=${project.filters.yearRange.startYear}-${project.filters.yearRange.endYear}&openAccessPdf&minCitationCount=${project.filters.minCitationCount}&fieldsOfStudy=${project.research_domain}&publicationTypes=${project.filters.publicationTypes.join(",")}&fields=title,year,openAccessPdf&limit=${project.filters.paperCount}`;
         console.log("API URL:", URL);
         const pdfsToUpload = []
         axios.get(URL)
@@ -317,7 +338,7 @@ async function downloadPDF(bucket, project_id, browser, metadata) {
 
 async function uploadMultiplePDFs(pdfList, project_id) {
     const { default: pLimit } = await import("p-limit");
-    const limit = pLimit(5); // Limit concurrency to 5
+    const limit = pLimit(8); // Limit concurrency to 8
 
     
     const browser = await puppeteer.launch({ headless: true });
