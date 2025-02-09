@@ -25,7 +25,7 @@ const ChooseFilters = () => {
             try {
                 const response = await axios.get(`http://127.0.0.1:5550/project/${projectId}?fields=research_question`);
                 
-                if (response.status !== 200) {
+                if (response.status === 400) {
                     return null;
                 }
 

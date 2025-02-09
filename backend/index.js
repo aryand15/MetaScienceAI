@@ -96,15 +96,20 @@ app.get("/project/:project_id", async(req, res) => {     // Route to fetch exist
         );
         const jsonProject = project.toObject();
         const response = {}
-        Object.entries(jsonProject).forEach(([key, value]) => {
-            if (fields.includes(key)){
-                response[key] = value;
+        if(fields){
+            for (const field of fields) {
+                if (!(field in jsonProject)) {
+                    return res.status(400).json({message: `Invalid field: ${field}"`});
+                }
+                response[field] = jsonProject[field];
             }
-        });
+        } else{
+            return res.status(201).json({ message: "Project fetched successfully", data: jsonProject });
+        }
 
         res.status(201).json({ message: "Project fetched successfully", data: response });
     } catch (error) {
-        res.status(500).json({ message: "Error updating project", error });
+        res.status(500).json({ message: "Error fetching project", error });
     }
 })
 
